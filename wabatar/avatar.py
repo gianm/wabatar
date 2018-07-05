@@ -1,7 +1,28 @@
+# Copyright 2018 Gian Merlino
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import asyncio
 import logging
 import re
 import time
+
+# Sensor and setpoint indexes.
+IDX_TEMPERATURE = 0
+IDX_CO2 = 2
+IDX_O2 = 3
+IDX_PRESSURE = 4
+IDX_RH = 5
 
 class AvatarProtocol(asyncio.Protocol):
   def __init__(self, sensor_cb, setpoint_cb):
@@ -20,6 +41,10 @@ class AvatarProtocol(asyncio.Protocol):
     # Current setpoint values.
     self.setpoints = {'time' : time.time()}
 
+    # Pending commands (see queue_command).
+    # Useful since the Avatar gets confused if you issue too many commands at once.
+    self.pending_commands = []
+
   # asyncio protocol function
   def connection_made(self, transport):
     self.transport = transport
@@ -27,7 +52,7 @@ class AvatarProtocol(asyncio.Protocol):
     transport.serial.rts = False
 
     # Turn on data logging and poll setpoints.
-    transport.write(b'DE=7\r\n')
+    self.queue_command('DE=7')
     self.poll_setpoints()
 
   # asyncio protocol function
@@ -37,8 +62,7 @@ class AvatarProtocol(asyncio.Protocol):
       nl_index = self.buffer.find("\r\n")
       while nl_index > -1:
         avatar_text = self.buffer[0:nl_index].strip()
-        self.log.debug("Received text: %s", avatar_text)
-
+        self.log.info("Received text: %s", avatar_text)
         self.buffer = self.buffer[(nl_index + 2):]
         nl_index = self.buffer.find("\r\n")
 
@@ -50,10 +74,7 @@ class AvatarProtocol(asyncio.Protocol):
           # I don't know what 2 and 6 are.
           self.sensors = {
             'time' : time.time(),
-            'temperature' : float(m.group(1)),
-            'co2' : float(m.group(3)),
-            'o2' : float(m.group(4)),
-            'pressure' : float(m.group(5)),
+            'values' : [float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4)), float(m.group(5)), float(m.group(6))]
           }
 
           for f in self.sensor_callbacks:
@@ -80,11 +101,16 @@ class AvatarProtocol(asyncio.Protocol):
               except Exception as e:
                 self.log.exception('Error executing setpoint callback.')
 
+          # Setpoint values are written by the Avatar in response to our request for them, so we should
+          # issue the next command.
+          self.received_command_response(avatar_text)
+
           return
 
         # Some command we issued, echoed back.
         m = re.fullmatch(r'(DE0\=7-|SP[0234])', avatar_text)
         if m:
+          self.received_command_response(avatar_text)
           return
 
         self.log.warn('Could not recognize data from serial port, ignoring: %s', avatar_text)
@@ -97,18 +123,43 @@ class AvatarProtocol(asyncio.Protocol):
     self.log.info('Serial port disconnected.')
     self.transport.loop.stop()
 
+  def queue_command(self, command):
+    command_bytes = command.encode() + b'\r\n'
+    if self.pending_commands:
+      self.log.info("Queued command: " + command)
+      self.pending_commands.append(command_bytes)
+    else:
+      self.log.info("Writing command immediately: " + command)
+      self.pending_commands.append(command_bytes)
+      self.transport.write(command_bytes)
+
+  def received_command_response(self, avatar_text):
+    if self.pending_commands:
+      del self.pending_commands[0]
+
+      if self.pending_commands:
+        next_command = self.pending_commands[0]
+        self.log.info("Writing queued command: %s (%s left)", next_command.decode().strip(), str(len(self.pending_commands)))
+        self.transport.write(next_command)
+    else:
+      self.log.warn("Got response to command I didn't issue, ignoring: %s", avatar_text)
+
   # Issue commands to poll setpoints.
   def poll_setpoints(self):
-    self.transport.write(b'SP0\r\n')
-    self.transport.write(b'SP2\r\n')
-    self.transport.write(b'SP3\r\n')
-    self.transport.write(b'SP4\r\n')
+    self.queue_command('SP0')
+    self.queue_command('SP2')
+    self.queue_command('SP3')
+    self.queue_command('SP4')
+
+  # Write a new setpoint.
+  def write_setpoint(self, index, value):
+    self.queue_command('SP' + str(int(index)) + '=' + str(float(value)))
 
   # Merge two setpoint data structures: a is the old one and b is the new one.
   def merge_setpoints(self, a, b):
     m = a.copy()
-    m.update(b.copy())
+    m.update(b)
     m['time'] = a['time']
-    if m is not a:
+    if m != a:
       m['time'] = b['time']
     return m

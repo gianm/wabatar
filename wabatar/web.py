@@ -20,14 +20,14 @@ import logging
 from aiohttp import web
 
 class WabatarServer:
-  def __init__(self, avatar):
+  def __init__(self, avatars):
     self.app = web.Application()
     self.app.router.add_route('GET', '/', self.get_root)
     self.app.router.add_route('GET', '/v1/status', self.get_status)
     self.app.router.add_route('POST', '/v1/setpoint', self.post_setpoint)
 
     self.log = logging.getLogger(__name__)
-    self.avatar = avatar
+    self.avatars = avatars
 
   def new_handler(self):
     return self.app.make_handler()
@@ -36,10 +36,13 @@ class WabatarServer:
     return web.Response(body=r'<html><head><title>WABATAR</title></head><body><div style="text-align: center"><img src="https://user-images.githubusercontent.com/1214075/42293069-2117eb7c-7f8c-11e8-9264-277f6dab0492.jpg" style="width:80%" /></div></body></html>'.encode(), headers={'Content-Type': 'text/html'})
 
   async def get_status(self, request):
-    return web.Response(body=json.dumps({'sensors': self.avatar.sensors, 'setpoints' : self.avatar.setpoints}).encode(), headers={'Content-Type': 'application/json'})
+    statuses = {}
+    for name, avatar in self.avatars.items():
+      statuses[name] = avatar.status()
+    return web.Response(body=json.dumps(statuses).encode(), headers={'Content-Type': 'application/json'})
 
   async def post_setpoint(self, request):
     request_obj = await request.json()
-    self.avatar.write_setpoint(int(request_obj['index']), float(request_obj['value']))
-    self.avatar.poll_setpoints()
+    self.avatars[request_obj['name']].write_setpoint(int(request_obj['index']), float(request_obj['value']))
+    self.avatars[request_obj['name']].poll_setpoints()
     return web.Response(body=json.dumps({'ok' : True}).encode(), headers={'Content-Type': 'application/json'})

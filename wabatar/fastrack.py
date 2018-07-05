@@ -39,7 +39,10 @@ class FastrackEmitter:
     finally:
       self.ctr = self.ctr - 1
 
-  def emit(self, sensors, setpoints):
+  def emit(self, name, status):
+    if not self.session:
+      self.log.warn('Skipping send to fastrack, not yet started.')
+
     if self.ctr > 100:
       self.log.warn('Skipping send to fastrack, too many queued.')
     else:
@@ -47,6 +50,7 @@ class FastrackEmitter:
         url = 'https://cc-int.imply.io/g/imply/ft.gif?' + urllib.parse.urlencode({
           'A' : 'FT-WABATAR',
           'D01' : kind,
+          'D02' : name,
           'M01' : values[avatar.IDX_TEMPERATURE] if len(values) > avatar.IDX_TEMPERATURE else 0,
           'M02' : values[avatar.IDX_CO2] if len(values) > avatar.IDX_CO2 else 0,
           'M03' : values[avatar.IDX_O2] if len(values) > avatar.IDX_O2 else 0,
@@ -58,5 +62,5 @@ class FastrackEmitter:
         self.ctr = self.ctr + 1
         task.add_done_callback(self.emit_done_cb)
 
-      do_send('sensor', sensors['values'])
-      do_send('setpoint', setpoints)
+      do_send('sensor', status['sensors']['values'])
+      do_send('setpoint', status['setpoints']['values'])

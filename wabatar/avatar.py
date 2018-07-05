@@ -26,14 +26,13 @@ IDX_RH = 5
 SETPOINT_LEN = 6
 
 class AvatarProtocol(asyncio.Protocol):
-  def __init__(self, cb):
-    self.log = logging.getLogger(__name__)
+  def __init__(self, name, callbacks):
+    self.log = logging.getLogger(__name__).getChild(name)
+    self.name = name
+    self.callbacks = callbacks
 
     # Buffer for text coming off the serial port.
     self.buffer = ''
-
-    # Callbacks.
-    self.callbacks = cb
 
     # Current sensor values.
     self.sensors = {}
@@ -79,7 +78,7 @@ class AvatarProtocol(asyncio.Protocol):
 
           for f in self.callbacks:
             try:
-              f(self.sensors, [self.setpoints.get(i, 0) for i in range(0, SETPOINT_LEN)])
+              f(self.status())
             except Exception as e:
               self.log.exception('Error executing sensor callback.')
 
@@ -122,10 +121,10 @@ class AvatarProtocol(asyncio.Protocol):
   def queue_command(self, command):
     command_bytes = command.encode() + b'\r\n'
     if self.pending_commands:
-      self.log.info("Queued command: " + command)
+      self.log.debug("Queued command: " + command)
       self.pending_commands.append(command_bytes)
     else:
-      self.log.info("Writing command immediately: " + command)
+      self.log.debug("Writing command immediately: " + command)
       self.pending_commands.append(command_bytes)
       self.transport.write(command_bytes)
 
@@ -135,7 +134,7 @@ class AvatarProtocol(asyncio.Protocol):
 
       if self.pending_commands:
         next_command = self.pending_commands[0]
-        self.log.info("Writing queued command: %s (%s left)", next_command.decode().strip(), str(len(self.pending_commands)))
+        self.log.debug("Writing queued command: %s (%s left)", next_command.decode().strip(), str(len(self.pending_commands)))
         self.transport.write(next_command)
     else:
       self.log.warn("Got response to command I didn't issue, ignoring: %s", avatar_text)
@@ -159,3 +158,10 @@ class AvatarProtocol(asyncio.Protocol):
     if m != a:
       m['time'] = b['time']
     return m
+
+  def status(self):
+    # Make setpoints look like sensors, for consistency.
+    return {
+      'sensors' : self.sensors,
+      'setpoints' : { 'time' : self.setpoints['time'], 'values' : [self.setpoints.get(i, 0) for i in range(0, SETPOINT_LEN)] }
+    }

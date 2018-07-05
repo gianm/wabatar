@@ -36,7 +36,7 @@ if __name__ == "__main__":
   # FasTrack reporting.
   fastrack_ctr = [0]
 
-  # This generates an error: ERROR:asyncio:Creating a client session outside of coroutine, but seems to work anyway.
+  # This generates an error: UserWarning: Creating a client session outside of coroutine is a very dangerous idea
   # Should figure out how to do this better, then.
   fastrack_session = aiohttp.ClientSession()
 
@@ -49,36 +49,37 @@ if __name__ == "__main__":
     finally:
       ctr[0] = ctr[0] - 1
 
-  def fastrack_send(ctr, sensors):
-    if ctr[0] > 20:
+  def fastrack_send(ctr, sensors, setpoints):
+    if ctr[0] > 100:
       log.warn('Skipping send to fastrack, too many queued.')
     else:
-      url = 'https://cc-int.imply.io/g/imply/ft.gif?' + urllib.parse.urlencode({
-        'A' : 'FT-WABATAR',
-        'M01' : sensors['values'][avatar.IDX_TEMPERATURE],
-        'M02' : sensors['values'][avatar.IDX_CO2],
-        'M03' : sensors['values'][avatar.IDX_O2],
-        'M04' : sensors['values'][avatar.IDX_PRESSURE],
-        'M05' : sensors['values'][avatar.IDX_RH],
-      })
-      log.debug('Sending message to fastrack: ' + url)
-      task = asyncio.ensure_future(fastrack_session.get(url))
-      ctr[0] = ctr[0] + 1
-      task.add_done_callback(functools.partial(fastrack_done_cb, ctr))
+      def do_send(kind, values):
+        url = 'https://cc-int.imply.io/g/imply/ft.gif?' + urllib.parse.urlencode({
+          'A' : 'FT-WABATAR',
+          'D01' : kind,
+          'M01' : values[avatar.IDX_TEMPERATURE] if len(values) > avatar.IDX_TEMPERATURE else 0,
+          'M02' : values[avatar.IDX_CO2] if len(values) > avatar.IDX_CO2 else 0,
+          'M03' : values[avatar.IDX_O2] if len(values) > avatar.IDX_O2 else 0,
+          'M04' : values[avatar.IDX_PRESSURE] if len(values) > avatar.IDX_PRESSURE else 0,
+          'M05' : values[avatar.IDX_RH] if len(values) > avatar.IDX_RH else 0,
+        })
+        log.debug('Sending message to fastrack: ' + url)
+        task = asyncio.ensure_future(fastrack_session.get(url))
+        ctr[0] = ctr[0] + 1
+        task.add_done_callback(functools.partial(fastrack_done_cb, ctr))
 
-  # Set up sensor and setpoint callbacks.
-  sensor_callbacks = []
-  setpoint_callbacks = []
+      do_send('sensor', sensors['values'])
+      do_send('setpoint', setpoints)
 
-  sensor_callbacks.append(lambda x: log.info("Sensors: " + repr(x)))
-  sensor_callbacks.append(functools.partial(fastrack_send, fastrack_ctr))
-
-  setpoint_callbacks.append(lambda x: log.info("Setpoints: " + repr(x)))
+  # Set up Avatar callbacks.
+  callbacks = []
+  callbacks.append(lambda x, y: log.info("Sensors: %s (setpoints = %s)", repr(x), repr(y)))
+  callbacks.append(functools.partial(fastrack_send, fastrack_ctr))
 
   # Set up asyncio.
   loop = asyncio.get_event_loop()
 
-  avatar_obj = avatar.AvatarProtocol(sensor_callbacks, setpoint_callbacks)
+  avatar_obj = avatar.AvatarProtocol(callbacks)
   avatar_coro = serial_asyncio.create_serial_connection(loop, lambda: avatar_obj, '/dev/ttyUSB0', baudrate=9600)
   avatar_task = loop.run_until_complete(avatar_coro)
 

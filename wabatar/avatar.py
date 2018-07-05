@@ -23,17 +23,17 @@ IDX_CO2 = 2
 IDX_O2 = 3
 IDX_PRESSURE = 4
 IDX_RH = 5
+SETPOINT_LEN = 6
 
 class AvatarProtocol(asyncio.Protocol):
-  def __init__(self, sensor_cb, setpoint_cb):
+  def __init__(self, cb):
     self.log = logging.getLogger(__name__)
 
     # Buffer for text coming off the serial port.
     self.buffer = ''
 
     # Callbacks.
-    self.sensor_callbacks = sensor_cb
-    self.setpoint_callbacks = setpoint_cb
+    self.callbacks = cb
 
     # Current sensor values.
     self.sensors = {}
@@ -62,7 +62,7 @@ class AvatarProtocol(asyncio.Protocol):
       nl_index = self.buffer.find("\r\n")
       while nl_index > -1:
         avatar_text = self.buffer[0:nl_index].strip()
-        self.log.info("Received text: %s", avatar_text)
+        self.log.debug("Received text: %s", avatar_text)
         self.buffer = self.buffer[(nl_index + 2):]
         nl_index = self.buffer.find("\r\n")
 
@@ -77,9 +77,9 @@ class AvatarProtocol(asyncio.Protocol):
             'values' : [float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4)), float(m.group(5)), float(m.group(6))]
           }
 
-          for f in self.sensor_callbacks:
+          for f in self.callbacks:
             try:
-              f(self.sensors)
+              f(self.sensors, [self.setpoints.get(i, 0) for i in range(0, SETPOINT_LEN)])
             except Exception as e:
               self.log.exception('Error executing sensor callback.')
 
@@ -94,12 +94,8 @@ class AvatarProtocol(asyncio.Protocol):
           new_setpoints = self.merge_setpoints(self.setpoints, { 'time' : time.time(), setpoint_id : setpoint_value })
 
           if self.setpoints != new_setpoints:
+            self.log.info("New setpoints: %s", new_setpoints)
             self.setpoints = new_setpoints
-            for f in self.setpoint_callbacks:
-              try:
-                f(new_setpoints)
-              except Exception as e:
-                self.log.exception('Error executing setpoint callback.')
 
           # Setpoint values are written by the Avatar in response to our request for them, so we should
           # issue the next command.

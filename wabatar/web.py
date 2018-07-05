@@ -16,6 +16,7 @@ import asyncio
 import aiohttp
 import json
 import logging
+import time
 
 from aiohttp import web
 
@@ -33,7 +34,26 @@ class WabatarServer:
     return self.app.make_handler()
 
   async def get_root(self, request):
-    return web.Response(body=r'<html><head><title>WABATAR</title></head><body><div style="text-align: center"><img src="https://user-images.githubusercontent.com/1214075/42293069-2117eb7c-7f8c-11e8-9264-277f6dab0492.jpg" style="width:80%" /></div></body></html>'.encode(), headers={'Content-Type': 'text/html'})
+    html = r'<html><head><title>WABATAR</title></head><body><div style="text-align: center"><h1>WABATAR</h1><table border="1" width="100%">'
+    html += r'<tr><th>Avatar</th><th>Temperature (deg C)</th><th>O<sub>2</sub> (%)</th><th>CO<sub>2</sub> (%)</th><th>Pressure (psi above ambient)</th><th>Relative humidity (%)</th><th>Last update</th></tr>'
+
+    for name, avatar in self.avatars.items():
+      status = avatar.status()
+
+      html += '<tr>'
+      html += '<td>' + name + '</td>'
+
+      for i in [0, 2, 3, 4, 5]:
+        html += '<td>'
+        html += str(status['sensors']['values'][i])
+        html += '</td>'
+
+      html += '<td>' + str(time.time() - status['sensors']['time']) + 's ago (sensors), ' + str(time.time() - status['setpoints']['time']) + 's ago (setpoints)</td>'
+      html += '</tr>'
+
+    html += r'</table></body></html>'
+
+    return web.Response(body=html.encode(), headers={'Content-Type': 'text/html'})
 
   async def get_status(self, request):
     statuses = {}

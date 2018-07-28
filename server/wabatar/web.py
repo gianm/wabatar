@@ -23,9 +23,9 @@ from aiohttp import web
 class WabatarServer:
   def __init__(self, avatars):
     self.app = web.Application()
-    self.app.router.add_route('GET', '/', self.get_root)
     self.app.router.add_route('GET', '/v1/status', self.get_status)
     self.app.router.add_route('POST', '/v1/setpoint', self.post_setpoint)
+    self.app.router.add_static('/', '../app/build')
 
     self.log = logging.getLogger(__name__)
     self.avatars = avatars
@@ -33,32 +33,11 @@ class WabatarServer:
   def new_handler(self):
     return self.app.make_handler()
 
-  async def get_root(self, request):
-    html = r'<html><head><title>WABATAR</title></head><body><div style="text-align: center"><h1>WABATAR</h1><table border="1" width="100%">'
-    html += r'<tr><th>Avatar</th><th>Temperature (deg C)</th><th>O<sub>2</sub> (%)</th><th>CO<sub>2</sub> (%)</th><th>Pressure (psi above ambient)</th><th>Relative humidity (%)</th><th>Last update</th></tr>'
-
-    for name, avatar in self.avatars.items():
-      status = avatar.status()
-
-      html += '<tr>'
-      html += '<td>' + name + '</td>'
-
-      for i in [0, 2, 3, 4, 5]:
-        html += '<td>'
-        html += str(status['sensors']['values'][i])
-        html += '</td>'
-
-      html += '<td>' + str(time.time() - status['sensors']['time']) + 's ago (sensors), ' + str(time.time() - status['setpoints']['time']) + 's ago (setpoints)</td>'
-      html += '</tr>'
-
-    html += r'</table></body></html>'
-
-    return web.Response(body=html.encode(), headers={'Content-Type': 'text/html'})
-
   async def get_status(self, request):
-    statuses = {}
-    for name, avatar in self.avatars.items():
-      statuses[name] = avatar.status()
+    statuses = []
+    for name in sorted(self.avatars.keys()):
+      statuses.append(self.avatars[name].status())
+
     return web.Response(body=json.dumps(statuses).encode(), headers={'Content-Type': 'application/json'})
 
   async def post_setpoint(self, request):

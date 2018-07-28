@@ -162,6 +162,7 @@ class AvatarProtocol(asyncio.Protocol):
   def status(self):
     # Make setpoints look like sensors, for consistency.
     return {
+      'name' : self.name,
       'sensors' : self.sensors,
       'setpoints' : { 'time' : self.setpoints['time'], 'values' : [self.setpoints.get(i, 0) for i in range(0, SETPOINT_LEN)] }
     }
